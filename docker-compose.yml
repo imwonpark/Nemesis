@@ -1,0 +1,65 @@
+services:
+  # 1. PostgreSQL Database Service
+  db:
+    image: postgres:15-alpine
+    container_name: nemesis_db
+    volumes:
+      - postgres_data:/var/lib/postgresql/data/
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=nemesis
+      - POSTGRES_PASSWORD=nemesis
+      - POSTGRES_DB=nemesis_dev
+    restart: unless-stopped
+
+  # 2. Redis Message Broker Service for Celery
+  redis:
+    image: redis:7-alpine
+    container_name: nemesis_redis
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+
+  # 3. FastAPI Application Service (The API)
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: nemesis_api
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    volumes:
+      - ./app:/app
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql://nemesis:nemesis@db:5432/nemesis_dev
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+    depends_on:
+      - db
+      - redis
+    restart: unless-stopped
+
+  # 4. Celery Worker Service
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: nemesis_worker
+    # Use 'python -m celery' to avoid PATH issues inside the container
+    command: python -m celery -A app.worker.celery_app worker --loglevel=info
+    volumes:
+      - ./app:/app
+    environment:
+      - DATABASE_URL=postgresql://nemesis:nemesis@db:5432/nemesis_dev
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+    depends_on:
+      - db
+      - redis
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+
